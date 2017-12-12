@@ -1,6 +1,8 @@
 package com.laird.geotracker.controller;
 
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.ResourceBundle;
 
 import com.lynden.gmapsfx.GoogleMapView;
@@ -32,6 +34,7 @@ class RxUDPSever {
 	private GoogleMap map;
 	private Marker currentPos;
 	private boolean isClosed;
+	private SimpleDateFormat dateFormatter;
 
 	private UdpServer<DatagramPacket, DatagramPacket> UDPServer;
 	
@@ -41,6 +44,7 @@ class RxUDPSever {
 		this.currentPos = new Marker(new MarkerOptions().visible(false));
 		this.map.addMarker(currentPos);
 		this.isClosed = true;
+		this.dateFormatter = new SimpleDateFormat("dd-MM-yyyy");
 	}
 	
 	public Marker getCurrentPositionMarker() {
@@ -71,6 +75,9 @@ class RxUDPSever {
 	
 	private Pair<Double,Double> getPosition(ByteBuf buffer) {
 		int index = buffer.readerIndex();
+		for(int i=index;i<16;i++) {
+			System.out.print(String.format("%02X ",buffer.getByte(index)));
+		}
 		double lon = buffer.getDouble(index);
 		index += Double.BYTES;
 		double lat = buffer.getDouble(index);
@@ -88,6 +95,8 @@ class RxUDPSever {
 
 							@Override
 							public Observable<Void> call(DatagramPacket received) {
+								System.out.println(String.format("from: %s", received.sender().getAddress().getHostAddress()));
+								System.out.println(dateFormatter.format(Calendar.getInstance().getTime()));
 								ByteBuf buffer = received.content();
 								Pair<Double,Double> pos = getPosition(buffer);
 								System.out.println(String.format("%f, %f", pos.getKey(), pos.getValue()));			
