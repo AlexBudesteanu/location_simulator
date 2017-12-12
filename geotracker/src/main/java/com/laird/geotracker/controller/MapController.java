@@ -1,8 +1,6 @@
 package com.laird.geotracker.controller;
 
 import java.net.URL;
-import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.ResourceBundle;
 
 import com.lynden.gmapsfx.GoogleMapView;
@@ -11,6 +9,8 @@ import com.lynden.gmapsfx.javascript.object.GoogleMap;
 import com.lynden.gmapsfx.javascript.object.LatLong;
 import com.lynden.gmapsfx.javascript.object.MapOptions;
 import com.lynden.gmapsfx.javascript.object.MapTypeIdEnum;
+import com.lynden.gmapsfx.javascript.object.Marker;
+import com.lynden.gmapsfx.javascript.object.MarkerOptions;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.socket.DatagramPacket;
@@ -18,9 +18,11 @@ import io.reactivex.netty.RxNetty;
 import io.reactivex.netty.channel.ConnectionHandler;
 import io.reactivex.netty.channel.ObservableConnection;
 import io.reactivex.netty.protocol.udp.server.UdpServer;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.Button;
+import javafx.util.Pair;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -28,14 +30,55 @@ class RxUDPSever {
 
 	private int port;
 	private GoogleMap map;
+	private Marker currentPos;
+	private boolean isClosed;
 
+	private UdpServer<DatagramPacket, DatagramPacket> UDPServer;
+	
 	public RxUDPSever(int port, GoogleMap map) {
 		this.port = port;
 		this.map = map;
+		this.currentPos = new Marker(new MarkerOptions().visible(false));
+		this.map.addMarker(currentPos);
+		this.isClosed = true;
 	}
-
-	public UdpServer<DatagramPacket, DatagramPacket> createServer() {
-		UdpServer<DatagramPacket, DatagramPacket> server = RxNetty.createUdpServer(this.port,
+	
+	public Marker getCurrentPositionMarker() {
+		return this.currentPos;
+	}
+	
+	public void startUdpServer(){
+		if(this.isClosed) {
+			UDPServer = createServer();
+			UDPServer.start();
+			currentPos.setVisible(true);
+			this.isClosed = false;
+		} else {
+			System.out.println("Server already started.");
+		}
+	}
+	
+	public void closeUdpServer() throws InterruptedException {
+		if(!this.isClosed) {
+			UDPServer.shutdown();
+			currentPos.setVisible(false);
+			currentPos.setPosition(null);
+			this.isClosed = true;
+		} else {
+			System.out.println("Server already closed.");
+		}
+	}
+	
+	private Pair<Double,Double> getPosition(ByteBuf buffer) {
+		int index = buffer.readerIndex();
+		double lon = buffer.getDouble(index);
+		index += Double.BYTES;
+		double lat = buffer.getDouble(index);
+		return new Pair<Double, Double>(lat, lon);
+	}
+	
+	private UdpServer<DatagramPacket, DatagramPacket> createServer() {
+		UdpServer<DatagramPacket, DatagramPacket> server = RxNetty.createUdpServer(port,
 				new ConnectionHandler<DatagramPacket, DatagramPacket>() {
 
 					@Override
@@ -45,20 +88,13 @@ class RxUDPSever {
 
 							@Override
 							public Observable<Void> call(DatagramPacket received) {
-								//InetSocketAddress sender = received.sender();
-//								System.out.println("Received datagram. Sender: " + sender + ", data: "
-//										+ received.content());
-								// TODO: put marker on map.
 								ByteBuf buffer = received.content();
-								byte[] bytes = new byte[buffer.readableBytes()];
-								int readerIndex = buffer.readerIndex();
-								buffer.getBytes(readerIndex, bytes);
-								byte[] latBytes = Arrays.copyOfRange(bytes, 0, 9);
-								//byte[] lonBytes = Arrays.copyOfRange(bytes, 9, 15);
-								double lat = ByteBuffer.wrap(latBytes).getDouble();
-								//double lon = ByteBuffer.wrap(lonBytes).getDouble();
-								System.out.println(String.format("%f", lat));
-								
+								Pair<Double,Double> pos = getPosition(buffer);
+								System.out.println(String.format("%f, %f", pos.getKey(), pos.getValue()));			
+								Platform.runLater(() ->{
+									LatLong position = new LatLong(pos.getKey(), pos.getValue());
+									currentPos.setPosition(position);
+								});
 								return Observable.just(null);
 							}
 						});
@@ -80,28 +116,19 @@ public class MapController implements Initializable, MapComponentInitializedList
 	@FXML
 	protected Button stopButton;
 	
-	UdpServer<DatagramPacket, DatagramPacket> server;
-	GoogleMap map;
+	RxUDPSever rxServer;
 
 	@Override
 	public void initialize(URL location, ResourceBundle resources) {
 		mapView.addMapInializedListener(this);
+		
 		startButton.setOnMouseClicked(event -> {
-			try {
-				if(server == null)
-					server = new RxUDPSever(8888, map).createServer();
-				server.start();
-			} catch (IllegalStateException e) {
-				System.out.println("Server already started.");
-			}
+			rxServer.startUdpServer();				
 		});
+		
 		stopButton.setOnMouseClicked(event -> {
 			try {
-				server.shutdown();
-				if(server != null)
-					server = null;
-			}  catch (IllegalStateException e) {
-				System.out.println("Server already closed.");
+				rxServer.closeUdpServer();
 			}  catch (InterruptedException e) {
 				e.printStackTrace();
 			}
@@ -113,7 +140,8 @@ public class MapController implements Initializable, MapComponentInitializedList
 		MapOptions options = new MapOptions();
 
 		options.center(new LatLong(44.4267674,26.1025384)).zoomControl(true).zoom(10).mapType(MapTypeIdEnum.ROADMAP);
-		map = mapView.createMap(options);
+		GoogleMap map = mapView.createMap(options);
+		rxServer = new RxUDPSever(8888, map);
 	}
 
 }
