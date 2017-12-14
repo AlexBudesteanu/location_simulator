@@ -4,12 +4,16 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.ResourceBundle;
 
 import com.lynden.gmapsfx.GoogleMapView;
 import com.lynden.gmapsfx.MapComponentInitializedListener;
+import com.lynden.gmapsfx.javascript.event.UIEventHandler;
+import com.lynden.gmapsfx.javascript.event.UIEventType;
 import com.lynden.gmapsfx.javascript.object.GoogleMap;
+import com.lynden.gmapsfx.javascript.object.InfoWindow;
 import com.lynden.gmapsfx.javascript.object.LatLong;
 import com.lynden.gmapsfx.javascript.object.MapOptions;
 import com.lynden.gmapsfx.javascript.object.MapTypeIdEnum;
@@ -29,6 +33,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.util.Pair;
+import netscape.javascript.JSObject;
 import rx.Observable;
 import rx.functions.Func1;
 
@@ -36,29 +41,25 @@ class RxUDPSever {
 
 	private int port;
 	private GoogleMap map;
-	private Marker currentPos;
+	private Marker startPos;
 	private boolean isClosed;
 	private SimpleDateFormat dateFormatter;
+	private MarkerOptions defaultMarkerOptions;
 
 	private UdpServer<DatagramPacket, DatagramPacket> UDPServer;
 	
 	public RxUDPSever(int port, GoogleMap map) {
 		this.port = port;
 		this.map = map;
-		this.currentPos = new Marker(new MarkerOptions().visible(false));
-		this.map.addMarker(currentPos);
+		this.startPos = null;
 		this.isClosed = true;
 		this.dateFormatter = new SimpleDateFormat("dd-MM-yyyy - HH:mm:ss");
-	}
-	
-	public Marker getCurrentPositionMarker() {
-		return this.currentPos;
+		this.defaultMarkerOptions = new MarkerOptions().visible(true);
 	}
 	
 	public void startUdpServer(){
 		if(this.isClosed) {
 			UDPServer = createServer();
-			currentPos.setVisible(true);
 			UDPServer.start();
 			this.isClosed = false;
 		} else {
@@ -90,6 +91,22 @@ class RxUDPSever {
 		alert.showAndWait();
 	}
 	
+	private void appendMarkersWithCallback(Marker marker){
+		ArrayList<Marker> temp = new ArrayList<Marker>();
+		temp.add(marker);
+		map.addMarkers(temp, UIEventType.click, (Marker m) -> {
+			return new UIEventHandler() {
+				
+				@Override
+				public void handle(JSObject arg0) {
+					InfoWindow window = new InfoWindow();
+					window.setContent(marker.getTitle());
+					window.open(map, m);
+				}
+			};
+		});
+	}
+	
 	private UdpServer<DatagramPacket, DatagramPacket> createServer() {
 		UdpServer<DatagramPacket, DatagramPacket> server = RxNetty.createUdpServer(port,
 				new ConnectionHandler<DatagramPacket, DatagramPacket>() {
@@ -101,14 +118,27 @@ class RxUDPSever {
 
 							@Override
 							public Observable<Void> call(DatagramPacket received) {
-								System.out.println(String.format("from: %s at %s", received.sender().getAddress().getHostAddress(),
-										dateFormatter.format(Calendar.getInstance().getTime())));
+								final String timestamp = dateFormatter.format(Calendar.getInstance().getTime());
+								System.out.println(String.format("from: %s at %s",
+										received.sender().getAddress().getHostAddress(),timestamp));
 								ByteBuf buffer = received.content();
 								Pair<Double,Double> pos = getPosition(buffer);
-								System.out.println(String.format("lat: %f\n lng: %f", pos.getKey(), pos.getValue()));		
+								System.out.println(String.format("lat: %f\nlng: %f", pos.getKey(), pos.getValue()));		
 								Platform.runLater(() ->{
-									LatLong position = new LatLong(pos.getKey(), pos.getValue());
-									currentPos.setPosition(position);
+									final LatLong position = new LatLong(pos.getKey(), pos.getValue());
+									String markerTitle = String.format("%s\n%s,%s", timestamp,position.getLatitude(),
+											position.getLongitude());
+									if(startPos == null){
+										startPos = new Marker(defaultMarkerOptions);
+										startPos.setPosition(position);
+										startPos.setTitle(markerTitle);
+										appendMarkersWithCallback(startPos);
+									} else {
+										Marker newPosition = new Marker(defaultMarkerOptions);
+										newPosition.setPosition(position);
+										newPosition.setTitle(markerTitle);
+										appendMarkersWithCallback(newPosition);
+									}
 									map.setCenter(position);
 								});
 								return Observable.just(null);
