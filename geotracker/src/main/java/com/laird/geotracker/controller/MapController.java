@@ -15,10 +15,13 @@ import com.lynden.gmapsfx.javascript.event.UIEventType;
 import com.lynden.gmapsfx.javascript.object.GoogleMap;
 import com.lynden.gmapsfx.javascript.object.InfoWindow;
 import com.lynden.gmapsfx.javascript.object.LatLong;
+import com.lynden.gmapsfx.javascript.object.MVCArray;
 import com.lynden.gmapsfx.javascript.object.MapOptions;
 import com.lynden.gmapsfx.javascript.object.MapTypeIdEnum;
 import com.lynden.gmapsfx.javascript.object.Marker;
 import com.lynden.gmapsfx.javascript.object.MarkerOptions;
+import com.lynden.gmapsfx.shapes.Polyline;
+import com.lynden.gmapsfx.shapes.PolylineOptions;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.socket.DatagramPacket;
@@ -45,8 +48,11 @@ class RxUDPSever {
 	private boolean isClosed;
 	private SimpleDateFormat dateFormatter;
 	private MarkerOptions defaultMarkerOptions;
+	private PolylineOptions polylineOptions;
+	private MVCArray wayPoints;
 
 	private UdpServer<DatagramPacket, DatagramPacket> UDPServer;
+	
 	
 	public RxUDPSever(int port, GoogleMap map) {
 		this.port = port;
@@ -55,6 +61,14 @@ class RxUDPSever {
 		this.isClosed = true;
 		this.dateFormatter = new SimpleDateFormat("dd-MM-yyyy - HH:mm:ss");
 		this.defaultMarkerOptions = new MarkerOptions().visible(true);
+		this.wayPoints = new MVCArray();
+		this.polylineOptions = new PolylineOptions()
+				.path(wayPoints)
+				.strokeColor("blue")
+				.strokeWeight(3)
+				.clickable(false);
+		Polyline path = new Polyline(polylineOptions);
+		this.map.addMapShape(path);
 	}
 	
 	public void startUdpServer(){
@@ -133,11 +147,13 @@ class RxUDPSever {
 										startPos.setPosition(position);
 										startPos.setTitle(markerTitle);
 										appendMarkersWithCallback(startPos);
+										wayPoints.push(position);
 									} else {
 										Marker newPosition = new Marker(defaultMarkerOptions);
 										newPosition.setPosition(position);
 										newPosition.setTitle(markerTitle);
 										appendMarkersWithCallback(newPosition);
+										wayPoints.push(position);
 									}
 									map.setCenter(position);
 								});
